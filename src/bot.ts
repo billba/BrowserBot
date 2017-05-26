@@ -42,23 +42,22 @@ const luis = new LuisModel('id', 'key');
 
 // Prompts
 
-import { TextPrompts, createChoice, createConfirm } from 'prague-botframework-browserbot';
+import { PromptRules, TextPrompts, createChoice, createConfirm } from 'prague-botframework-browserbot';
+
+const promptRules: PromptRules<B> = {
+    'Comment': rule<B>(
+            match => fetch(`https://jsonplaceholder.typicode.com/comments/${match.text}`)
+                .then(response => response.json())
+                .then(json => match.reply(json.name))
+        )
+}
 
 const prompts = new TextPrompts<B>(
+    promptRules,
     (match) => match.data.userInConversation.promptKey,
     (match, promptKey) => {
         match.data.userInConversation.promptKey = promptKey
     }
-);
-
-prompts.add('Comment',
-    rule<B>(
-        match => {
-            return fetch(`https://jsonplaceholder.typicode.com/comments/${match.text}`)
-                .then(response => response.json())
-                .then(json => match.reply(json.name));
-        }
-    )
 );
 
 const introRule = rule(

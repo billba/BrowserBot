@@ -60,10 +60,10 @@ const prompts = new TextPrompts<B>(
     }
 );
 
-const introRule = rule(
+const introRule = rule<B>(
     matchRegExp(/I am (.*)/i),
-    first<B & IRegExpMatch>(
-        rule<B & IRegExpMatch>(match => match.groups[1] === 'Bill', match => {
+    first(
+        rule(match => match.groups[1] === 'Bill', match => {
             match.reply(`You are very handsome, ${match.groups[1]}`);
             match.data.userInConversation.vip = true;
         }),
@@ -78,21 +78,21 @@ const appRule = first<B>(
 
     prompts,
 
-    re<B>(/show comment/, match => {
+    re(/show comment/, match => {
         match.reply("Which comment would you like to see (0-99)?");
         prompts.setPrompt(match, 'Comment');
     }),
 
     introRule,
 
-    luis.best<B>({
+    luis.best({
         'singASong': match =>
             match.reply(`Let's sing ${match.entityValues('song')[0]}`),
         'findSomething': match =>
             match.reply(`Okay let's find a ${match.entityValues('what')[0]} in ${match.entityValues('where')[0]}`)
     }),
 
-    re<B>(/Howdy|Hi|Hello|Wassup/i, match => match.reply("Howdy")),
+    re(/Howdy|Hi|Hello|Wassup/i, match => match.reply("Howdy")),
 
     match => match.reply(`I don't understand you${ match.data.userInConversation.vip ? ", sir" : ""}.`),
 );

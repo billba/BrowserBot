@@ -1,4 +1,4 @@
-import { UniversalChat, WebChatConnector, BrowserBot, IChatMessageMatch, reply } from 'prague-botframework-browserbot';
+import { UniversalChat, WebChatConnector, BrowserBot, IChatMessageMatch, reply, IRule } from 'prague-botframework-browserbot';
 
 const webChat = new WebChatConnector()
 window["browserBot"] = webChat.botConnection;
@@ -10,9 +10,23 @@ import { IStateMatch, ChatState } from 'prague-botframework-browserbot';
 
 // Add state to your bot here:
 
+import { DialogStack, DialogInstance, DialogInstances, Dialogs, LocalDialogs, IDialogMatch } from 'prague-botframework-browserbot'
+
+const ds: DialogStack = {
+    getActiveDialogInstance: (match: any, currentDialogInstance: DialogInstance) =>
+        match.data.userInConversation.dialogStack[currentDialogInstance.name],
+    setActiveDialogInstance: (match: any, currentDialogInstance: DialogInstance, activeDialogInstance?: DialogInstance) => {
+        console.log("setADI", match, currentDialogInstance, activeDialogInstance);
+        match.data.userInConversation.dialogStack[currentDialogInstance.name] = activeDialogInstance
+    }
+}
+
 interface UserInConversationState {
-    vip?: boolean,
-    promptKey?: string
+    vip?: boolean;
+    dialogStack: {
+        [name: string]: DialogInstance;
+    };
+    promptKey?: string;
 }
 
 type BotData = ChatState<undefined, undefined, undefined, undefined, UserInConversationState>;
@@ -20,9 +34,28 @@ type BotData = ChatState<undefined, undefined, undefined, undefined, UserInConve
 const botData: BotData = {
     bot: undefined,
     channel: undefined,
-    user: undefined,
+    userInChannel: undefined,
     conversation: undefined,
-    userInConversation: {}
+    userInConversation: {
+        dialogStack: {}
+    }
+}
+
+const dialogDataStorage: {
+        [name: string]: any[];
+} = {};
+
+const dialogInstances: DialogInstances = {
+    newInstance: (name: string, dialogData: any = {}) => {
+            if (!dialogDataStorage[name])
+                dialogDataStorage[name] = [];
+            return (dialogDataStorage[name].push(dialogData) - 1).toString();
+        },
+    getDialogData: (dialogInstance: DialogInstance) =>
+        dialogDataStorage[dialogInstance.name][dialogInstance.instance],
+    setDialogData: (dialogInstance: DialogInstance, dialogData?: any) => {
+        dialogDataStorage[dialogInstance.name][dialogInstance.instance] = dialogData;
+    }
 }
 
 type B = IStateMatch<BotData> & IChatMessageMatch;
@@ -60,7 +93,74 @@ const prompts = new TextPrompts<B>(
     }
 );
 
-const introRule = rule<B>(
+const dialogs = new Dialogs<B>(ds);
+const local = new LocalDialogs<B>(dialogInstances);
+
+interface GameState {
+    num: number,
+    guesses: number
+}
+
+interface GameArgs {
+    upperLimit: number;
+    maxGuesses: number;
+}
+
+interface GameResponse {
+    result: string;
+}
+
+dialogs.add('game', local.dialog<GameState, GameArgs, GameResponse>(
+    first(
+        run(m => console.log("game", m)),
+        re(/answer/, m => {
+            m.reply(`The answer is ${m.dialogData.num}`);
+            m.beginChildDialog<GameArgs>('game', { upperLimit: 100, maxGuesses: 5 });
+            // m.endThisDialog({ result: "cheat" });
+        }),
+        re(/guesses/, m => m.reply(`You have ${m.dialogData.guesses} left.`)),
+        rule(m => m.dialogData.guesses === 0, m => {
+            m.reply("You're out of guesses");
+            m.endThisDialog({ result: "hi"});
+        }),
+        rule(
+            m => {
+                const num = Number.parseInt(m.text);
+                return !isNaN(num) && {
+                    ... m as any,
+                    num
+                }
+            },
+            first(
+                run(m => {
+                    m.dialogData.guesses--
+                }),
+                rule(
+                    m => m.num < m.dialogData.num,
+                    m => m.reply(`That's too low. You have ${m.dialogData.guesses} guesses left`)
+                ),
+                rule(
+                    m => m.num > m.dialogData.num,
+                    m => m.reply(`That's too high. You have ${m.dialogData.guesses} guesses left`)
+                ),
+                m => {
+                    m.reply("that's it!");
+                    m.endThisDialog({ result: "success" });
+                }
+            )
+        ),
+        m => m.reply("Guess a number!")
+    ),
+    (match) => {
+        match.reply(`Guess a number between 0 and ${match.dialogArgs.upperLimit}. You have ${match.dialogArgs.maxGuesses} guesses.`)
+        return {
+            num: Math.random() * match.dialogArgs.upperLimit,
+            guesses: match.dialogArgs.maxGuesses
+        }
+    }
+));
+
+const introRule: IRule<B & IDialogMatch> = rule(
     matchRegExp(/I am (.*)/i),
     first(
         rule(match => match.groups[1] === 'Bill', match => {
@@ -74,16 +174,8 @@ const introRule = rule<B>(
     )
 );
 
-const appRule = first<B>(
-
-    prompts,
-
-    re(/show comment/, match => {
-        match.reply("Which comment would you like to see (0-99)?");
-        prompts.setPrompt(match, 'Comment');
-    }),
-
-    introRule,
+dialogs.addRule('/', first(
+    // prompts,
 
     luis.best({
         'singASong': match =>
@@ -92,11 +184,22 @@ const appRule = first<B>(
             match.reply(`Okay let's find a ${match.entityValues('what')[0]} in ${match.entityValues('where')[0]}`)
     }),
 
+    dialogs.runIfActive(),
+
+    re(/show comment/, match => {
+        match.reply("Which comment would you like to see (0-99)?");
+        prompts.setPrompt(match, 'Comment');
+    }),
+
+    re(/game/, m => m.beginChildDialog('game', { upperLimit: 100, maxGuesses: 5 })),
+
+    introRule,
+
     re(/Howdy|Hi|Hello|Wassup/i, match => match.reply("Howdy")),
 
     match => match.reply(`I don't understand you${ match.data.userInConversation.vip ? ", sir" : ""}.`),
-);
+));
 
 browserBot.run({
-    message: appRule
+    message: dialogs.runIfActive()
 });

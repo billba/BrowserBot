@@ -112,11 +112,14 @@ interface GameResponse {
 
 dialogs.add('game', local.dialog<GameState, GameArgs, GameResponse>(
     first(
+        re(/hi/, m => console.log("HI BILL")),
         run(m => console.log("game", m)),
         re(/answer/, m => {
             m.reply(`The answer is ${m.dialogData.num}`);
-            m.beginChildDialog<GameArgs>('game', { upperLimit: 100, maxGuesses: 5 });
-            // m.endThisDialog({ result: "cheat" });
+            // m.beginChildDialog('game', { upperLimit: 100, maxGuesses: 5 });
+            console.log("before");
+            m.endThisDialog({ result: "cheat" });
+            console.log("after");
         }),
         re(/guesses/, m => m.reply(`You have ${m.dialogData.guesses} left.`)),
         rule(m => m.dialogData.guesses === 0, m => {
@@ -154,7 +157,7 @@ dialogs.add('game', local.dialog<GameState, GameArgs, GameResponse>(
     (match) => {
         match.reply(`Guess a number between 0 and ${match.dialogArgs.upperLimit}. You have ${match.dialogArgs.maxGuesses} guesses.`)
         return {
-            num: Math.random() * match.dialogArgs.upperLimit,
+            num: Math.floor(Math.random() * match.dialogArgs.upperLimit),
             guesses: match.dialogArgs.maxGuesses
         }
     }
@@ -193,6 +196,8 @@ dialogs.addRule('/', first(
 
     re(/game/, m => m.beginChildDialog('game', { upperLimit: 100, maxGuesses: 5 })),
 
+    re(/hi/, m => console.log("HI BILL")),
+
     introRule,
 
     re(/Howdy|Hi|Hello|Wassup/i, match => match.reply("Howdy")),
@@ -201,5 +206,5 @@ dialogs.addRule('/', first(
 ));
 
 browserBot.run({
-    message: dialogs.runIfActive()
+    message: dialogs.runIfActive('/')
 });

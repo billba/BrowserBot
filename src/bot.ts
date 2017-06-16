@@ -1,8 +1,3 @@
-import { UniversalChat, WebChatConnector, BrowserBot, IChatMessageMatch, reply, IRule } from 'prague-botframework-browserbot';
-
-const webChat = new WebChatConnector()
-window["browserBot"] = webChat.botConnection;
-
 import { IStateMatch, ChatState } from 'prague-botframework-browserbot';
 
 // It's overkill for BrowserBot use ChatState, but it opens the door to reusing all/most of the code
@@ -10,22 +5,9 @@ import { IStateMatch, ChatState } from 'prague-botframework-browserbot';
 
 // Add state to your bot here:
 
-import { DialogStack, DialogInstance, DialogInstances, Dialogs, LocalDialogs, IDialogMatch } from 'prague-botframework-browserbot'
-
-const ds: DialogStack = {
-    getActiveDialogInstance: (match: any, currentDialogInstance: DialogInstance) =>
-        match.data.userInConversation.dialogStack[currentDialogInstance.name],
-    setActiveDialogInstance: (match: any, currentDialogInstance: DialogInstance, activeDialogInstance?: DialogInstance) => {
-        console.log("setADI", match, currentDialogInstance, activeDialogInstance);
-        match.data.userInConversation.dialogStack[currentDialogInstance.name] = activeDialogInstance
-    }
-}
-
 interface UserInConversationState {
     vip?: boolean;
-    dialogStack: {
-        [name: string]: DialogInstance;
-    };
+    rootDialogInstance?: DialogInstance;
     promptKey?: string;
 }
 
@@ -37,33 +19,26 @@ const botData: BotData = {
     userInChannel: undefined,
     conversation: undefined,
     userInConversation: {
-        dialogStack: {}
     }
 }
 
-const dialogDataStorage: {
-        [name: string]: any[];
-} = {};
+import { UniversalChat, WebChatConnector, BrowserBot, IChatMessageMatch } from 'prague-botframework-browserbot';
 
-const dialogInstances: DialogInstances = {
-    newInstance: (name: string, dialogData: any = {}) => {
-            if (!dialogDataStorage[name])
-                dialogDataStorage[name] = [];
-            return (dialogDataStorage[name].push(dialogData) - 1).toString();
-        },
-    getDialogData: (dialogInstance: DialogInstance) =>
-        dialogDataStorage[dialogInstance.name][dialogInstance.instance],
-    setDialogData: (dialogInstance: DialogInstance, dialogData?: any) => {
-        dialogDataStorage[dialogInstance.name][dialogInstance.instance] = dialogData;
-    }
-}
+const webChat = new WebChatConnector()
+window["browserBot"] = webChat.botConnection;
+const browserBot = new BrowserBot<BotData>(new UniversalChat(webChat.chatConnector), botData);
+
+// This is our "base message type" which is used often enough that we made it really short
 
 type B = IStateMatch<BotData> & IChatMessageMatch;
 
-const browserBot = new BrowserBot<BotData>(new UniversalChat(webChat.chatConnector), botData);
+// General purpose rule stuff
+
+import { IRule, first, rule, run } from 'prague-botframework-browserbot';
+
+// Regular Expressions
 
 import { matchRegExp, re, IRegExpMatch } from 'prague-botframework-browserbot';
-import { first, rule, run } from 'prague-botframework-browserbot';
 
 // LUIS
 
@@ -93,8 +68,40 @@ const prompts = new TextPrompts<B>(
     }
 );
 
-const dialogs = new Dialogs<B>(ds);
-const local = new LocalDialogs<B>(dialogInstances);
+// Dialogs
+
+import { RootDialogInstance, DialogInstance, LocalDialogInstances, Dialogs, IDialogRootMatch } from 'prague-botframework-browserbot'
+
+// Here is where we create and store dialog instances and their data. In the real world this would be an external store e.g. Redis
+
+const dialogDataStorage: {
+    [name: string]: any[];
+} = {};
+
+const dialogs = new Dialogs<B>({
+        get: (match) => match.data.userInConversation.rootDialogInstance,
+        set: (match, rootDialogInstance) => {
+            match.data.userInConversation.rootDialogInstance = rootDialogInstance
+        }
+    }, {
+        newInstance: (name: string, dialogData: any = {}) => {
+            if (!dialogDataStorage[name])
+                dialogDataStorage[name] = [];
+            return (dialogDataStorage[name].push(dialogData) - 1).toString();
+        },
+        getDialogData: (dialogInstance: DialogInstance) => ({ ...
+            dialogDataStorage[dialogInstance.name][dialogInstance.instance]
+        }),
+        setDialogData: (dialogInstance: DialogInstance, dialogData?: any) => {
+            dialogDataStorage[dialogInstance.name][dialogInstance.instance] = dialogData;
+        }
+    }
+);
+
+dialogs.addLocal('stock', first(
+    re(/msft/, m => m.reply("MSFT is up to 95!")),
+    re(/aapl/, m => m.reply("AAPL is down to 10!"))
+));
 
 interface GameState {
     num: number,
@@ -110,21 +117,21 @@ interface GameResponse {
     result: string;
 }
 
-dialogs.add('game', local.dialog<GameState, GameArgs, GameResponse>(
+dialogs.addLocal<GameState, GameArgs, GameResponse>('game',
     first(
-        re(/hi/, m => console.log("HI BILL")),
+        dialogs.runChildIfActive(),
+        re(/stock/, m => m.beginChildDialog('stock')),
+        re(/clear/, m => m.clearChildDialog()),
+        re(/replace/, m => m.replaceThisDialog('stock', undefined, { result: "replaced" })),
         run(m => console.log("game", m)),
         re(/answer/, m => {
             m.reply(`The answer is ${m.dialogData.num}`);
-            // m.beginChildDialog('game', { upperLimit: 100, maxGuesses: 5 });
-            console.log("before");
-            m.endThisDialog({ result: "cheat" });
-            console.log("after");
+            return m.endThisDialog({ result: "cheat" });
         }),
         re(/guesses/, m => m.reply(`You have ${m.dialogData.guesses} left.`)),
         rule(m => m.dialogData.guesses === 0, m => {
-            m.reply("You're out of guesses");
-            m.endThisDialog({ result: "hi"});
+            m.reply(`You're out of guesses. The answer was ${m.dialogData.num}. Game over.`);
+            return m.endThisDialog({ result: "failure"});
         }),
         rule(
             m => {
@@ -148,22 +155,22 @@ dialogs.add('game', local.dialog<GameState, GameArgs, GameResponse>(
                 ),
                 m => {
                     m.reply("that's it!");
-                    m.endThisDialog({ result: "success" });
+                    return m.endThisDialog({ result: "success" });
                 }
             )
         ),
         m => m.reply("Guess a number!")
     ),
-    (match) => {
-        match.reply(`Guess a number between 0 and ${match.dialogArgs.upperLimit}. You have ${match.dialogArgs.maxGuesses} guesses.`)
+    match => {
+        match.reply(`Guess a number between 0 and ${match.dialogArgs.upperLimit}. You have ${match.dialogArgs.maxGuesses} guesses.`);
         return {
             num: Math.floor(Math.random() * match.dialogArgs.upperLimit),
             guesses: match.dialogArgs.maxGuesses
         }
     }
-));
+);
 
-const introRule: IRule<B & IDialogMatch> = rule(
+const introRule: IRule<B & IDialogRootMatch> = rule(
     matchRegExp(/I am (.*)/i),
     first(
         rule(match => match.groups[1] === 'Bill', match => {
@@ -177,7 +184,7 @@ const introRule: IRule<B & IDialogMatch> = rule(
     )
 );
 
-dialogs.addRule('/', first(
+const appRule: IRule<B & IDialogRootMatch> = first(
     // prompts,
 
     luis.best({
@@ -187,14 +194,16 @@ dialogs.addRule('/', first(
             match.reply(`Okay let's find a ${match.entityValues('what')[0]} in ${match.entityValues('where')[0]}`)
     }),
 
-    dialogs.runIfActive(),
+    dialogs.runChildIfActive('game', match => match.reply(`I hear that the result of your game was ${match.dialogResponse.result}`)),
+
+    re(/prompt me/, match => match.beginChildDialog('prompt', { text: "What do you want to do with your life?" })),
 
     re(/show comment/, match => {
         match.reply("Which comment would you like to see (0-99)?");
         prompts.setPrompt(match, 'Comment');
     }),
 
-    re(/game/, m => m.beginChildDialog('game', { upperLimit: 100, maxGuesses: 5 })),
+    re(/game/, m => m.beginChildDialog<GameArgs>('game', { upperLimit: 100, maxGuesses: 5 })),
 
     re(/hi/, m => console.log("HI BILL")),
 
@@ -203,8 +212,8 @@ dialogs.addRule('/', first(
     re(/Howdy|Hi|Hello|Wassup/i, match => match.reply("Howdy")),
 
     match => match.reply(`I don't understand you${ match.data.userInConversation.vip ? ", sir" : ""}.`),
-));
+);
 
 browserBot.run({
-    message: dialogs.runIfActive('/')
+    message: appRule.prependMatcher(match => dialogs.matchRootDialog(match))
 });

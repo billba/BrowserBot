@@ -1,6 +1,6 @@
 {
   "name": "browserbot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "sample prague browser bot",
   "main": "public/bot.js",
   "scripts": {
@@ -19,6 +19,6 @@
     "webpack": "^2.3.2"
   },
   "dependencies": {
-    "prague-botframework-browserbot": "../../prague/recipes/botframework-browserbot"
+    "prague-botframework-browserbot": "0.2.0"
   }
 }

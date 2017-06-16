@@ -117,49 +117,32 @@ interface GameResponse {
     result: string;
 }
 
-dialogs.addLocal<GameState, GameArgs, GameResponse>('game',
+dialogs.addLocal<GameArgs, GameResponse, GameState>('game',
     first(
         dialogs.runChildIfActive(),
         re(/stock/, m => m.beginChildDialog('stock')),
         re(/clear/, m => m.clearChildDialog()),
         re(/replace/, m => m.replaceThisDialog('stock', undefined, { result: "replaced" })),
-        run(m => console.log("game", m)),
-        re(/answer/, m => {
-            m.reply(`The answer is ${m.dialogData.num}`);
-            return m.endThisDialog({ result: "cheat" });
-        }),
-        re(/guesses/, m => m.reply(`You have ${m.dialogData.guesses} left.`)),
-        rule(m => m.dialogData.guesses === 0, m => {
-            m.reply(`You're out of guesses. The answer was ${m.dialogData.num}. Game over.`);
-            return m.endThisDialog({ result: "failure"});
-        }),
-        rule(
-            m => {
-                const num = Number.parseInt(m.text);
-                return !isNaN(num) && {
-                    ... m as any,
-                    num
-                }
-            },
-            first(
-                run(m => {
-                    m.dialogData.guesses--
-                }),
-                rule(
-                    m => m.num < m.dialogData.num,
-                    m => m.reply(`That's too low. You have ${m.dialogData.guesses} guesses left`)
-                ),
-                rule(
-                    m => m.num > m.dialogData.num,
-                    m => m.reply(`That's too high. You have ${m.dialogData.guesses} guesses left`)
-                ),
-                m => {
-                    m.reply("that's it!");
-                    return m.endThisDialog({ result: "success" });
-                }
-            )
-        ),
-        m => m.reply("Guess a number!")
+        re(/help/, m => m.reply("special game help")),
+        rule(matchRegExp(/\d+/), m => {
+            const guess = m.groups[0];
+            if (guess === m.dialogData.num) {
+                m.reply("You're right!");
+                return m.endThisDialog({ result: "win" });
+            }
+
+            if (guess < m.data.userInConversation.num )
+                m.reply("That is too low.");
+            else
+                m.reply("That is too high.");
+
+            if (--m.dialogData.guesses === 0) {
+                m.reply("You are out of guesses");
+                return m.endThisDialog({ result: "lose" });
+            }
+            
+            m.reply(`You have ${m.dialogData.guesses} left.`);
+        })
     ),
     match => {
         match.reply(`Guess a number between 0 and ${match.dialogArgs.upperLimit}. You have ${match.dialogArgs.maxGuesses} guesses.`);

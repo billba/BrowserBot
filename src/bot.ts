@@ -6,7 +6,6 @@ import { IStateMatch, ChatState } from 'prague-botframework-browserbot';
 // Add state to your bot here:
 
 interface UserInConversationState {
-    vip?: boolean;
     rootDialogInstance?: DialogInstance;
 }
 
@@ -33,7 +32,7 @@ type B = IStateMatch<BotData> & IChatMessageMatch;
 
 // General purpose rule stuff
 
-import { IRule, first, prependMatcher, rule, run } from 'prague-botframework-browserbot';
+import { IRule, first, best, prependMatcher, rule, run } from 'prague-botframework-browserbot';
 
 // Regular Expressions
 
@@ -63,24 +62,69 @@ const dialogs = new Dialogs<B>({
             match.data.userInConversation.rootDialogInstance = rootDialogInstance
         }
     }, {
-        newInstance: (name: string, dialogData: any = {}) => {
+        newInstance: (name, dialogData: any = {}) => {
             if (!dialogDataStorage[name])
                 dialogDataStorage[name] = [];
-            return (dialogDataStorage[name].push(dialogData) - 1).toString();
+            return {
+                name,
+                instance: (dialogDataStorage[name].push(dialogData) - 1).toString()
+            };
         },
-        getDialogData: (dialogInstance: DialogInstance) => ({ ...
+        getDialogData: (dialogInstance) => ({ ...
             dialogDataStorage[dialogInstance.name][dialogInstance.instance]
         }),
-        setDialogData: (dialogInstance: DialogInstance, dialogData?: any) => {
+        setDialogData: (dialogInstance, dialogData?) => {
             dialogDataStorage[dialogInstance.name][dialogInstance.instance] = dialogData;
         }
+    }, {
+        matchLocalToRemote: (match: B) => ({
+            activity: match.activity,
+            text: match.text,
+            message: match.message,
+            address: match.address,
+            data: match.data,
+            dialogStack: (match as any).dialogStack || []
+        }),
+        matchRemoteToLocal: (match) => ({
+            activity: match.activity,
+            text: match.text,
+            message: match.message,
+            address: match.address,
+            data: match.data,
+            dialogStack: match.dialogStack || []
+        } as any),
+        executeTasks: (tasks) => {
+        },
     }
 );
 
-dialogs.addLocal('stock', first(
-    re(/msft/, m => m.reply("MSFT is up to 95!")),
-    re(/aapl/, m => m.reply("AAPL is down to 10!"))
-));
+// Prompts/Dialogs
+
+const commentPrompt = dialogs.addLocal(
+    match => match.reply("Which comment would you like to see (0-99)?"),
+    match => fetch(`https://jsonplaceholder.typicode.com/comments/${match.text}`)
+        .then(response => response.json())
+        .then(json => {
+            match.reply(json.name);
+            return match.replaceThisDialog(anotherPrompt);
+        })
+    ,
+    'Comment',
+)
+const anotherPrompt = dialogs.addLocal(
+    match => match.reply("Would you like to see another?"),
+    first(
+        rule(
+            m => m.text === 'yes',
+            match => match.replaceThisDialog(commentPrompt)
+        ),
+        match => {
+            match.reply("See you later, alligator.");
+            return match.endThisDialog();
+        }
+    ),
+    'Another',
+)
 
 interface GameState {
     num: number,
@@ -96,99 +140,54 @@ interface GameResponse {
     result: string;
 }
 
-dialogs.addLocal<GameArgs, GameResponse, GameState>('game',
-    first(
-        dialogs.runChildIfActive(),
-        re(/stock/, m => m.beginChildDialog('stock')),
-        re(/clear/, m => m.clearChildDialog()),
-        re(/replace/, m => m.replaceThisDialog('stock', undefined, { result: "replaced" })),
-        re(/help/, m => m.reply("special game help")),
-        re(/\d+/, m => {
-            const guess = m.groups[0] as any as number;
-            if (guess === m.dialogData.num) {
-                m.reply("You're right!");
-                return m.endThisDialog({ result: "win" });
-            }
-
-            if (guess < m.dialogData.num )
-                m.reply("That is too low.");
-            else
-                m.reply("That is too high.");
-
-            if (--m.dialogData.guesses === 0) {
-                m.reply("You are out of guesses");
-                return m.endThisDialog({ result: "lose" });
-            }
-            
-            m.reply(`You have ${m.dialogData.guesses} left.`);
-        })
-    ),
-    match => {
-        match.reply(`Guess a number between 0 and ${match.dialogArgs.upperLimit}. You have ${match.dialogArgs.maxGuesses} guesses.`);
-        return {
-            num: Math.floor(Math.random() * match.dialogArgs.upperLimit),
-            guesses: match.dialogArgs.maxGuesses
-        }
-    }
+const gameDialog = dialogs.addRemote<GameArgs, GameResponse>(
+    'http://localhost:9000/dialogs',
+    'game'
 );
-
-// Prompts
-
-dialogs.addLocal('Comment',
-    rule(
-        match => fetch(`https://jsonplaceholder.typicode.com/comments/${match.text}`)
-            .then(response => response.json())
-            .then(json => {
-                match.reply(json.name);
-                return match.replaceThisDialog('Another');
-            })
-    ),
-    match => match.reply("Which comment would you like to see (0-99)?")
-)
-
-dialogs.addLocal('Another',
-    first(
-        rule(m => m.text === 'yes', match => match.replaceThisDialog('Comment')),
-        match => {
-            match.reply("See you later, alligator.");
-            return match.endThisDialog();
-        }
-    ),
-    match => match.reply("Would you like to see another?")
-)
 
 const appRule: IRule<B & IDialogRootMatch> = first(
+
+
     dialogs.runChildIfActive(),
-
-    re(/show comment/, match => match.beginChildDialog('Comment')),
-
-    re(/game/, m => m.beginChildDialog<GameArgs>('game', { upperLimit: 100, maxGuesses: 5 })),
-
-    re(/I am (.*)/i,
+    re(/show comment/, m => m.beginChildDialog(commentPrompt)),
+    re(/help/, m => m.reply("there is no help for you")),
+    re(/game/, m => m.beginChildDialog(gameDialog, { upperLimit: 50, maxGuesses: 10 })),
+    re(/I am (.*)/,
         first(
-            rule(match => match.groups[1] === 'Bill', match => {
-                match.reply(`You are very handsome, ${match.groups[1]}`);
-                match.data.userInConversation.vip = true;
-            }),
-            match => {
-                match.reply(`Nice to meet you, ${match.groups[1]}`);
-                match.data.userInConversation.vip = false;
-            }
+            rule(
+                m => m.groups[1] === 'Bill',
+                m => m.reply(`You are a very special flower, ${m.groups[1]}`)
+            ),
+            m => m.reply(`Nice to meet you, ${m.groups[1]}`),
         )
     ),
+    re(/Hello|Hi|Wassup/i, m => m.reply("Hi there")),
+    m => m.reply(`Peace out, dawg`)
 
-    luis.best({
-        'singASong': match =>
-            match.reply(`Let's sing ${match.entityValues('song')[0]}`),
-        'findSomething': match =>
-            match.reply(`Okay let's find a ${match.entityValues('what')[0]} in ${match.entityValues('where')[0]}`)
-    }),
-
-    re(/Howdy|Hi|Hello|Wassup/i, match => match.reply("Howdy")),
-
-    match => match.reply(`I don't understand you${ match.data.userInConversation.vip ? ", sir" : ""}.`),
+    
 );
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 browserBot.run({
     message: prependMatcher(match => dialogs.matchRootDialog(match), appRule)
 });
+

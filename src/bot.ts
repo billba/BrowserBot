@@ -85,15 +85,31 @@ const dialogs = new Dialogs<B>({
             data: match.data,
             dialogStack: (match as any).dialogStack || []
         }),
-        matchRemoteToLocal: (match) => ({
+        matchRemoteToLocal: (match, tasks) => ({
             activity: match.activity,
             text: match.text,
             message: match.message,
             address: match.address,
             data: match.data,
-            dialogStack: match.dialogStack || []
+            dialogStack: match.dialogStack || [],
+            reply: (message: any) => tasks.push({
+                method: 'reply',
+                args: {
+                    message
+                }
+            })
         } as any),
-        executeTasks: (tasks) => {
+        executeTasks: (match, tasks) => {
+            tasks.forEach(task => {
+                switch (task.method) {
+                    case 'reply':
+                        match.reply(task.args.message);
+                        break;
+                    default:
+                        console.warn(`Remote dialog added task "${task.method}" but no such task exists.`)
+                        break;
+                }
+            })
         },
     }
 );

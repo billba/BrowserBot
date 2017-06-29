@@ -83,7 +83,6 @@ const dialogs = new Dialogs<B>({
             message: match.message,
             address: match.address,
             data: match.data,
-            dialogStack: (match as any).dialogStack || []
         }),
         matchRemoteToLocal: (match, tasks) => ({
             activity: match.activity,
@@ -91,7 +90,6 @@ const dialogs = new Dialogs<B>({
             message: match.message,
             address: match.address,
             data: match.data,
-            dialogStack: match.dialogStack || [],
             reply: (message: any) => tasks.push({
                 method: 'reply',
                 args: {

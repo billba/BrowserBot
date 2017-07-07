@@ -32,7 +32,7 @@ type B = IStateMatch<BotData> & IChatMessageMatch;
 
 // General purpose rule stuff
 
-import { IRule, first, best, prependMatcher, rule, run } from 'prague-botframework-browserbot';
+import { IRouter, first, best, prependMatcher, router, run } from 'prague-botframework-browserbot';
 
 // Regular Expressions
 
@@ -127,7 +127,7 @@ const anotherPrompt = dialogs.add(
     'Another',
     match => match.reply("Would you like to see another?"),
     first(
-        rule(
+        router(
             m => m.text === 'yes',
             match => match.replaceThisDialog(commentPrompt)
         ),
@@ -193,7 +193,7 @@ const gameDialog = dialogs.add<GameArgs, GameResponse>(
 //     ),
 // );
 
-const appRule: IRule<B & IDialogRootMatch> = first(
+const appRule: IRouter<B & IDialogRootMatch> = first(
 
     re(/help/, m => m.reply("there is no help for you")),
     dialogs.runChildIfActive(),
@@ -202,7 +202,7 @@ const appRule: IRule<B & IDialogRootMatch> = first(
     re(/game/, m => m.beginChildDialog(gameDialog, { upperLimit: 50, maxGuesses: 10 })),
     re(/I am (.*)/,
         first(
-            rule(
+            router(
                 m => m.groups[1] === 'Bill',
                 m => m.reply(`You are a very special flower, ${m.groups[1]}`)
             ),

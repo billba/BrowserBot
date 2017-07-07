@@ -70,6 +70,7 @@ const dialogs = new Dialogs<B>({
                 instance: (dialogDataStorage[name].push(dialogData) - 1).toString()
             };
         },
+        deleteInstance: (dialogInstance) => {},
         getDialogData: (dialogInstance) => ({ ...
             dialogDataStorage[dialogInstance.name][dialogInstance.instance]
         }),
@@ -97,24 +98,23 @@ const dialogs = new Dialogs<B>({
                 }
             })
         } as any),
-        executeTasks: (match, tasks) => {
-            tasks.forEach(task => {
-                switch (task.method) {
-                    case 'reply':
-                        match.reply(task.args.message);
-                        break;
-                    default:
-                        console.warn(`Remote dialog added task "${task.method}" but no such task exists.`)
-                        break;
-                }
-            })
+        executeTask: (match, task) => {
+            switch (task.method) {
+                case 'reply':
+                    match.reply(task.args.message);
+                    break;
+                default:
+                    console.warn(`Remote dialog added task "${task.method}" but no such task exists.`)
+                    break;
+            }
         },
     }
 );
 
 // Prompts/Dialogs
 
-const commentPrompt = dialogs.addLocal(
+const commentPrompt = dialogs.add(
+    'Comment',
     match => match.reply("Which comment would you like to see (0-99)?"),
     match => fetch(`https://jsonplaceholder.typicode.com/comments/${match.text}`)
         .then(response => response.json())
@@ -122,10 +122,9 @@ const commentPrompt = dialogs.addLocal(
             match.reply(json.name);
             return match.replaceThisDialog(anotherPrompt);
         })
-    ,
-    'Comment',
 )
-const anotherPrompt = dialogs.addLocal(
+const anotherPrompt = dialogs.add(
+    'Another',
     match => match.reply("Would you like to see another?"),
     first(
         rule(
@@ -136,8 +135,7 @@ const anotherPrompt = dialogs.addLocal(
             match.reply("See you later, alligator.");
             return match.endThisDialog();
         }
-    ),
-    'Another',
+    )
 )
 
 interface GameState {
@@ -154,17 +152,53 @@ interface GameResponse {
     result: string;
 }
 
-const gameDialog = dialogs.addRemote<GameArgs, GameResponse>(
+const gameDialog = dialogs.add<GameArgs, GameResponse>(
+    'game',
     'http://localhost:9000/dialogs',
-    'game'
 );
+
+// const gameDialog = dialogs.add<GameArgs, GameResponse, GameState>(
+//     'game',
+//     m => {
+//         console.log("game activate");
+//         m.reply(`Guess a number between 0 and ${m.dialogArgs.upperLimit}. You have ${m.dialogArgs.maxGuesses} guesses.`);
+//         return {
+//             num: Math.floor(Math.random() * m.dialogArgs.upperLimit),
+//             guesses: m.dialogArgs.maxGuesses
+//         }
+//     },
+//     first(
+//         re(/local/, m => console.log("no remote tasks")),
+//         re(/help/, m => m.reply("game help")),
+//         re(/cheat/, m => m.reply(`The answer is ${m.dialogData.num}`)),
+//         re(/\d+/, m => {
+//             const guess = parseInt(m.groups[0]);
+//             if (guess === m.dialogData.num) {
+//                 m.reply("You're right!");
+//                 return m.endThisDialog({ result: "win" });
+//             }
+
+//             if (guess < m.dialogData.num )
+//                 m.reply("That is too low.");
+//             else
+//                 m.reply("That is too high.");
+
+//             if (--m.dialogData.guesses === 0) {
+//                 m.reply("You are out of guesses");
+//                 return m.endThisDialog({ result: "lose" });
+//             }
+            
+//             m.reply(`You have ${m.dialogData.guesses} left.`);
+//         }),
+//     ),
+// );
 
 const appRule: IRule<B & IDialogRootMatch> = first(
 
-
+    re(/help/, m => m.reply("there is no help for you")),
     dialogs.runChildIfActive(),
     re(/show comment/, m => m.beginChildDialog(commentPrompt)),
-    re(/help/, m => m.reply("there is no help for you")),
+    re(/clear/, m => m.clearChildDialog()),
     re(/game/, m => m.beginChildDialog(gameDialog, { upperLimit: 50, maxGuesses: 10 })),
     re(/I am (.*)/,
         first(
@@ -178,7 +212,6 @@ const appRule: IRule<B & IDialogRootMatch> = first(
     re(/Hello|Hi|Wassup/i, m => m.reply("Hi there")),
     m => m.reply(`Peace out, dawg`)
 
-    
 );
 
 
